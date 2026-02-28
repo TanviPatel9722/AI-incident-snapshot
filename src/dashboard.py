@@ -6,9 +6,12 @@ import urllib.request
 import urllib.error
 import importlib.util
 from pathlib import Path
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 def _load_module(module_name: str, file_path: Path):
     spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -187,6 +190,321 @@ def _data_quality_summary(
     )
 
 
+def _build_pdf_report(
+    filtered_incidents: pd.DataFrame,
+    filtered_reports: pd.DataFrame,
+    date_col: str | None,
+    selected_domains: list[str],
+    taxonomy_name: str,
+    selected_tax_vals: list[str],
+) -> bytes:
+    buf = BytesIO()
+
+    with PdfPages(buf) as pdf:
+        # Page 1: Executive summary
+        fig = plt.figure(figsize=(11.69, 8.27))
+        ax = fig.add_subplot(111)
+        ax.axis("off")
+
+        incidents_n = len(filtered_incidents)
+        reports_n = len(filtered_reports)
+        avg_reports = (
+            filtered_incidents["report_count"].mean()
+            if "report_count" in filtered_incidents.columns and incidents_n > 0
+            else 0.0
+        )
+        med_reports = (
+            filtered_incidents["report_count"].median()
+            if "report_count" in filtered_incidents.columns and incidents_n > 0
+            else 0.0
+        )
+        evidence_total = (
+            int(filtered_incidents["evidence_total"].sum())
+            if "evidence_total" in filtered_incidents.columns
+            else 0
+        )
+
+        lines = [
+            "AI Incident Observatory - Analysis Report",
+            "",
+            "Scope",
+            f"- Incidents (filtered): {incidents_n:,}",
+            f"- Reports (filtered): {reports_n:,}",
+            f"- Avg reports/incident: {avg_reports:.2f}",
+            f"- Median reports/incident: {med_reports:.2f}",
+            f"- Total evidence records: {evidence_total:,}",
+            "",
+            "Applied filters",
+            f"- Source domains filter: {', '.join(selected_domains) if selected_domains else 'All'}",
+            f"- Taxonomy table: {taxonomy_name}",
+            f"- Taxonomy values: {', '.join(selected_tax_vals) if selected_tax_vals else 'All'}",
+        ]
+        if date_col is not None and date_col in filtered_incidents.columns:
+            valid_dates = pd.to_datetime(filtered_incidents[date_col], errors="coerce", utc=True).dropna()
+            if not valid_dates.empty:
+                lines.append(f"- Date range in filtered data: {valid_dates.min().date()} to {valid_dates.max().date()}")
+
+        y = 0.95
+        for i, line in enumerate(lines):
+            fs = 20 if i == 0 else 12
+            ax.text(0.03, y, line, fontsize=fs, va="top")
+            y -= 0.05 if i == 0 else 0.04
+
+        pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+
+        # Page 2: Incidents over time
+        if date_col is not None and date_col in filtered_incidents.columns:
+            ts = (
+                filtered_incidents.assign(_plot_date=_clean_date_series(filtered_incidents[date_col]))
+                .dropna(subset=["_plot_date"])
+                .set_index("_plot_date")
+                .resample("M")
+                .size()
+            )
+            if not ts.empty:
+                fig = plt.figure(figsize=(11.69, 8.27))
+                ax = fig.add_subplot(111)
+                ts.plot(ax=ax, lw=1.7)
+                ax.set_title("Incidents Over Time (Monthly)")
+                ax.set_xlabel("Date")
+                ax.set_ylabel("Incident Count")
+                pdf.savefig(fig, bbox_inches="tight")
+                plt.close(fig)
+
+        # Page 3: Top domains + harm (if present)
+        fig = plt.figure(figsize=(11.69, 8.27))
+        ax1 = fig.add_subplot(211)
+        ax2 = fig.add_subplot(212)
+
+        domain_counts = (
+            filtered_reports["source_domain"].dropna().astype(str).value_counts().head(15)
+            if "source_domain" in filtered_reports.columns
+            else pd.Series(dtype=int)
+        )
+        if not domain_counts.empty:
+            domain_counts.sort_values().plot(kind="barh", ax=ax1)
+            ax1.set_title("Top Report Source Domains")
+            ax1.set_xlabel("Count")
+        else:
+            ax1.axis("off")
+            ax1.text(0.0, 0.5, "No source domain data available.", fontsize=12)
+
+        harm_counts = (
+            filtered_incidents["harm_domain_top"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .value_counts()
+            .head(15)
+            if "harm_domain_top" in filtered_incidents.columns
+            else pd.Series(dtype=int)
+        )
+        harm_counts = harm_counts[harm_counts.index != ""]
+        if not harm_counts.empty:
+            harm_counts.sort_values().plot(kind="barh", ax=ax2)
+            ax2.set_title("Top Harm Domains (CSET)")
+            ax2.set_xlabel("Count")
+        else:
+            ax2.axis("off")
+            ax2.text(0.0, 0.5, "No harm-domain data available in filtered results.", fontsize=12)
+
+        pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+
+        # Page 4: Distribution-focused graphs
+        fig = plt.figure(figsize=(11.69, 8.27))
+        ax1 = fig.add_subplot(221)
+        ax2 = fig.add_subplot(222)
+        ax3 = fig.add_subplot(223)
+        ax4 = fig.add_subplot(224)
+
+        if "report_count" in filtered_incidents.columns and not filtered_incidents.empty:
+            rc = pd.to_numeric(filtered_incidents["report_count"], errors="coerce").fillna(0)
+            ax1.hist(rc, bins=20)
+            ax1.set_title("Report Count Distribution")
+            ax1.set_xlabel("Reports per incident")
+            ax1.set_ylabel("Incidents")
+        else:
+            ax1.axis("off")
+            ax1.text(0.05, 0.5, "No report_count data", fontsize=10)
+
+        if "evidence_total" in filtered_incidents.columns and not filtered_incidents.empty:
+            ev = pd.to_numeric(filtered_incidents["evidence_total"], errors="coerce").fillna(0)
+            ax2.hist(ev, bins=20)
+            ax2.set_title("Evidence Total Distribution")
+            ax2.set_xlabel("Evidence records per incident")
+            ax2.set_ylabel("Incidents")
+        else:
+            ax2.axis("off")
+            ax2.text(0.05, 0.5, "No evidence_total data", fontsize=10)
+
+        if "ai_harm_level_top" in filtered_incidents.columns:
+            harm_lvl = (
+                filtered_incidents["ai_harm_level_top"]
+                .dropna()
+                .astype(str)
+                .str.strip()
+            )
+            harm_lvl = harm_lvl[harm_lvl != ""]
+            if not harm_lvl.empty:
+                harm_lvl.value_counts().head(10).sort_values().plot(kind="barh", ax=ax3)
+                ax3.set_title("AI Harm Levels (Top)")
+                ax3.set_xlabel("Count")
+            else:
+                ax3.axis("off")
+                ax3.text(0.05, 0.5, "No AI harm level data", fontsize=10)
+        else:
+            ax3.axis("off")
+            ax3.text(0.05, 0.5, "No AI harm level column", fontsize=10)
+
+        ll = (
+            pd.to_numeric(filtered_incidents["lives_lost_max"], errors="coerce").fillna(0)
+            if "lives_lost_max" in filtered_incidents.columns
+            else pd.Series([], dtype=float)
+        )
+        inj = (
+            pd.to_numeric(filtered_incidents["injuries_max"], errors="coerce").fillna(0)
+            if "injuries_max" in filtered_incidents.columns
+            else pd.Series([], dtype=float)
+        )
+        if not ll.empty or not inj.empty:
+            ll_pos = int(ll.gt(0).sum()) if not ll.empty else 0
+            inj_pos = int(inj.gt(0).sum()) if not inj.empty else 0
+            neither = max(len(filtered_incidents) - ll_pos - inj_pos, 0)
+            ax4.bar(["Lives Lost > 0", "Injuries > 0", "Neither"], [ll_pos, inj_pos, neither])
+            ax4.set_title("Severe Outcome Signals")
+            ax4.set_ylabel("Incident count")
+        else:
+            ax4.axis("off")
+            ax4.text(0.05, 0.5, "No lives_lost/injuries columns", fontsize=10)
+
+        fig.tight_layout()
+        pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+
+    return buf.getvalue()
+
+
+def _fig_to_png_bytes(fig) -> bytes:
+    buf = BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=200)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def _build_single_graph_png(
+    graph_key: str,
+    filtered_incidents: pd.DataFrame,
+    filtered_reports: pd.DataFrame,
+    date_col: str | None,
+) -> tuple[bytes | None, str, str]:
+    if graph_key == "Incidents Over Time":
+        if date_col is None or date_col not in filtered_incidents.columns:
+            return None, "incidents_over_time.png", "No date column available."
+        ts = (
+            filtered_incidents.assign(_plot_date=_clean_date_series(filtered_incidents[date_col]))
+            .dropna(subset=["_plot_date"])
+            .set_index("_plot_date")
+            .resample("M")
+            .size()
+        )
+        if ts.empty:
+            return None, "incidents_over_time.png", "No data available for incidents over time."
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111)
+        ts.plot(ax=ax, lw=1.7)
+        ax.set_title("Incidents Over Time (Monthly)")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Incident Count")
+        return _fig_to_png_bytes(fig), "incidents_over_time.png", ""
+
+    if graph_key == "Top Report Source Domains":
+        if "source_domain" not in filtered_reports.columns:
+            return None, "top_report_source_domains.png", "source_domain column not available."
+        counts = filtered_reports["source_domain"].dropna().astype(str).value_counts().head(15)
+        if counts.empty:
+            return None, "top_report_source_domains.png", "No source domain data available."
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111)
+        counts.sort_values().plot(kind="barh", ax=ax)
+        ax.set_title("Top Report Source Domains")
+        ax.set_xlabel("Count")
+        return _fig_to_png_bytes(fig), "top_report_source_domains.png", ""
+
+    if graph_key == "Top Harm Domains":
+        if "harm_domain_top" not in filtered_incidents.columns:
+            return None, "top_harm_domains.png", "harm_domain_top column not available."
+        counts = (
+            filtered_incidents["harm_domain_top"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .value_counts()
+            .head(15)
+        )
+        counts = counts[counts.index != ""]
+        if counts.empty:
+            return None, "top_harm_domains.png", "No harm domain data available."
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111)
+        counts.sort_values().plot(kind="barh", ax=ax)
+        ax.set_title("Top Harm Domains (CSET)")
+        ax.set_xlabel("Count")
+        return _fig_to_png_bytes(fig), "top_harm_domains.png", ""
+
+    if graph_key == "Report Count Distribution":
+        if "report_count" not in filtered_incidents.columns:
+            return None, "report_count_distribution.png", "report_count column not available."
+        series = pd.to_numeric(filtered_incidents["report_count"], errors="coerce").fillna(0)
+        if series.empty:
+            return None, "report_count_distribution.png", "No report_count data available."
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111)
+        ax.hist(series, bins=20)
+        ax.set_title("Report Count Distribution")
+        ax.set_xlabel("Reports per incident")
+        ax.set_ylabel("Incidents")
+        return _fig_to_png_bytes(fig), "report_count_distribution.png", ""
+
+    if graph_key == "Evidence Total Distribution":
+        if "evidence_total" not in filtered_incidents.columns:
+            return None, "evidence_total_distribution.png", "evidence_total column not available."
+        series = pd.to_numeric(filtered_incidents["evidence_total"], errors="coerce").fillna(0)
+        if series.empty:
+            return None, "evidence_total_distribution.png", "No evidence_total data available."
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111)
+        ax.hist(series, bins=20)
+        ax.set_title("Evidence Total Distribution")
+        ax.set_xlabel("Evidence records per incident")
+        ax.set_ylabel("Incidents")
+        return _fig_to_png_bytes(fig), "evidence_total_distribution.png", ""
+
+    if graph_key == "AI Harm Levels":
+        if "ai_harm_level_top" not in filtered_incidents.columns:
+            return None, "ai_harm_levels.png", "ai_harm_level_top column not available."
+        counts = (
+            filtered_incidents["ai_harm_level_top"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .value_counts()
+            .head(15)
+        )
+        counts = counts[counts.index != ""]
+        if counts.empty:
+            return None, "ai_harm_levels.png", "No AI harm level data available."
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(111)
+        counts.sort_values().plot(kind="barh", ax=ax)
+        ax.set_title("AI Harm Levels")
+        ax.set_xlabel("Count")
+        return _fig_to_png_bytes(fig), "ai_harm_levels.png", ""
+
+    return None, "graph.png", "Unknown graph selection."
+
+
 def _render_summary(data: dict[str, object]) -> None:
     incidents_enriched: pd.DataFrame = data["incidents_enriched"]  # type: ignore[assignment]
     reports: pd.DataFrame = data["reports"]  # type: ignore[assignment]
@@ -229,6 +547,7 @@ def _render_summary(data: dict[str, object]) -> None:
         "Taxonomy filter table",
         options=["None"] + sorted(aligned.keys()),
     )
+    selected_tax_vals: list[str] = []
 
     filtered_incidents = overview.copy()
     filtered_reports = reports.copy()
@@ -402,7 +721,7 @@ def _render_summary(data: dict[str, object]) -> None:
     st.dataframe(quality_df, hide_index=True, use_container_width=True)
 
     st.subheader("Downloads")
-    d1, d2 = st.columns(2)
+    d1, d2, d3 = st.columns(3)
     d1.download_button(
         "Download Filtered Incidents CSV",
         data=filtered_incidents.to_csv(index=False).encode("utf-8"),
@@ -415,6 +734,44 @@ def _render_summary(data: dict[str, object]) -> None:
         file_name="filtered_reports.csv",
         mime="text/csv",
     )
+    pdf_bytes = _build_pdf_report(
+        filtered_incidents=filtered_incidents,
+        filtered_reports=filtered_reports,
+        date_col=date_col,
+        selected_domains=selected_domains,
+        taxonomy_name=taxonomy_name,
+        selected_tax_vals=selected_tax_vals,
+    )
+    d3.download_button(
+        "Download PDF Report",
+        data=pdf_bytes,
+        file_name="ai_incident_analysis_report.pdf",
+        mime="application/pdf",
+    )
+    graph_options = [
+        "Incidents Over Time",
+        "Top Report Source Domains",
+        "Top Harm Domains",
+        "Report Count Distribution",
+        "Evidence Total Distribution",
+        "AI Harm Levels",
+    ]
+    selected_graph = st.selectbox("Choose a single graph to download", options=graph_options)
+    graph_bytes, graph_filename, graph_err = _build_single_graph_png(
+        graph_key=selected_graph,
+        filtered_incidents=filtered_incidents,
+        filtered_reports=filtered_reports,
+        date_col=date_col,
+    )
+    if graph_bytes is None:
+        st.info(graph_err)
+    else:
+        st.download_button(
+            "Download Selected Graph (PNG)",
+            data=graph_bytes,
+            file_name=graph_filename,
+            mime="image/png",
+        )
 
     st.subheader("Preview")
     st.write("Incidents (first 10 rows)")

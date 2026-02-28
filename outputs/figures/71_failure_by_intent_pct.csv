@@ -20,6 +20,8 @@ It normally takes five days for supposedly child-friendly content like cartoons 
 
 
 Related Classifications: Lack of Adversarial Robustness, Adversarial Data
+","Snippet Text: But just a few minutes of exploration by TechCrunch produced not just hateful rhetoric “in the style of Hitler,” but it repeated the same pandemic-related untruths noted by NewsGuard. As in it literally repeated them as the answer and cited ChatGPT’s generated disinfo (clearly marked as such in the original and in a NYT write-up) as the source.
+Related Classifications: Problematic Input, Inadequate Verification
 ","Snippet Text: Geometrically, gender bias is first shown to be captured by a direction in the word embedding.
 Related Classifications: Distributional Bias
 , Snippet Text: Second, gender neutral words are shown to be linearly separable from gender definition words in the word embedding.
@@ -63,27 +65,6 @@ Related Classifications: Input Sensitivity
 Related Classifications: Incomplete Data Attribute Capture
 , Snippet Text: For people who know education, this is shocking, but there are people who probably are not convinced by my explanation that these should be more correlated if the formulas truly measured learning. Some might think that this really just means that just like there are people who are better at math than language arts and vice versa, there are teachers who are better at teaching math than language arts and vice versa.
 Related Classifications: Underspecification
-","Snippet Text: “This is essentially finding ‘good words’ and ‘bad words,’ but it is clear that it cannot deal with any nuanced (or even just compositional) word usage.”
-Related Classifications: Context Misidentification
-, Snippet Text: For example, “racism is bad” triggers the old system into giving an overwhelmingly negative score because the words “racism” and “bad” are seen as negative, Goldberg says.
-Related Classifications: Context Misidentification
-, Snippet Text: The tool seems to rank profanity as highly toxic, while deeply harmful statements are often deemed safe
-
-
-Related Classifications: Context Misidentification
-Snippet Discussion: AI operates naively on modelled word senses.
-, Snippet Text: “Character-level models are much better able to understand misspellings and different fragments of words, but overall it’s going to do much worse,” Dixon told Quartz.
-Related Classifications: Generalization Failure
-, Snippet Text: But in real-world applications, these systems are susceptible to intelligent subversion or attacks,"" said senior author Radha Poovendran, chair of the UW electrical engineering department and director of the Network Security Lab.
-Related Classifications: Generalization Failure, Lack of Adversarial Robustness
-, Snippet Text: Designing a system with a benign operating environment in mind and deploying it in adversarial environments can have devastating consequences.""
-Related Classifications: Generalization Failure
-, Snippet Text: For example, simply changing ""idiot"" to ""idiiot"" reduced the toxicity rate of an otherwise identical comment from 84% to 20%.
-Related Classifications: Lack of Adversarial Robustness
-, Snippet Text: They showed one can subtly modify a phrase that receives a high toxicity score so that it contains the same abusive language but receives a low toxicity score.
-Related Classifications: Lack of Adversarial Robustness
-, Snippet Text: They showed that the system is vulnerable to both missing incendiary language and falsely blocking non-abusive phrases.
-Related Classifications: Lack of Adversarial Robustness
 ","Snippet Text: “You’re waiting on your job to control your life,” she said, with the scheduling software used by her employer dictating everything from “how much sleep Gavin will get to what groceries I’ll be able to buy this month.”
 Related Classifications: Underspecification
 , Snippet Text: Along with virtually every major retail and restaurant chain, Starbucks relies on software that choreographs workers in precise, intricate ballets, using sales patterns and other data to determine which of its 130,000 baristas are needed in its thousands of locations and exactly when.
@@ -93,5 +74,5 @@ Related Classifications: Underspecification
 , Snippet Text: In a follow-up piece, the author, Jodi Kantor, points directly to Kronos' scheduling software as the root of the problem.
 Related Classifications: Underspecification
 "
-Intentional,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,33.3,33.3,0.0,33.3
-Unintentional,20.0,10.0,10.0,10.0,10.0,10.0,10.0,10.0,0.0,0.0,10.0,0.0
+Intentional,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,33.3,33.3,33.3
+Unintentional,20.0,10.0,10.0,10.0,10.0,10.0,10.0,10.0,10.0,0.0,0.0,0.0
