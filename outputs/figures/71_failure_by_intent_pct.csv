@@ -1,0 +1,97 @@
+intent,"Snippet Text: 
+","Snippet Text: 
+Part of YouTube’s plan is to increase human moderation and tweak its algorithm, “training machine-learning technology across other challenging content areas, including child safety and hate speech.” YouTube will also cut down on channels that receive monetization and advertisements attached to these videos. Since YouTube Kids also includes ads — many of which, Golin says, aren’t child appropriate — this will affect channels and videos on the platform.
+Related Classifications: Tuning Issues
+, Snippet Text: ""Recommendations are designed to optimize watch time, there is no reason that it shows content that is actually good for kids. 
+Related Classifications: Tuning Issues
+, Snippet Text: On YouTube today, children are being exploited for money. YouTubers with channels specifically marketed toward children are cranking out videos to provide kids with loads of content to consume, as each video around 16 minutes long. (Which is the sweet spot for maximum ad revenue.) Frankly, YouTubers are practically begging their viewers to “smash” that like button and comment on their videos.
+I spent a weekend babysitting my brother’s children and they spent most of that time watching channels like Chad Wild Clay. He would ask a question like, “Who is going to win this game?” ask kids to comment their predictions in the comments and then proceed to play the game, giving the kids the answer in the same video. He’d do that same thing several times throughout the video.
+
+What’s the point of the interactive bits if they can just skip ahead and get their answers without commenting at all? It’s simple: the more engagement the video gets, the more likely it is to be picked up by YouTube’s recommendation algorithm, thus bringing in more traffic and more money.
+Related Classifications: Tuning Issues
+Snippet Discussion: Recommendation training / video ranking is utilizing likes and engagement too much.
+, Snippet Text: Conspiracy videos also appear when children search for popular conspiracy theories. Searches for ""chemtrails,"" ""flat earth,"" and ""nibiru"" are all allowed in the app. However, it's (hopefully) unlikely that children are regularly watching these videos unless they appear as suggestions on more popular content in the app.
+
+The conspiracy videos didn't just appear in searches or suggested videos, either. After watching several conspiracy videos, the top recommended video on the home page of YouTube Kids was a conspiracy theory about aliens on the moon:
+Related Classifications: Tuning Issues
+, Snippet Text: The first line of defense for YouTube Kids are algorithmic filters. After that, there is a team of humans that review videos which have been flagged. If a video with recognizable children’s characters gets flagged in YouTube’s main app, which is much larger than the Kids app, it will be sent to the policy review team. YouTube says it has thousands of people working around the clock in different time zones to review flagged content. If the review finds the video is in violation of the new policy, it will be age restrictied, automatically blocking it from showing up in the Kids app. YouTube says it typically takes at least a few days for content to make its way from YouTube proper to YouTube Kids, and the hope is that within that window, users will flag anything potentially disturbing to children. YouTube also has a team of volunteer moderators, which it calls Contributors, looking for inappropriate content. YouTube says it will start training its review team on the new policy and it should be live within a few weeks. 
+It normally takes five days for supposedly child-friendly content like cartoons to get from YouTube to YouTube Kids. Within that window it is hoped users and a specially-trained team will flag disturbing content.
+
+
+
+Related Classifications: Lack of Adversarial Robustness, Adversarial Data
+","Snippet Text: Geometrically, gender bias is first shown to be captured by a direction in the word embedding.
+Related Classifications: Distributional Bias
+, Snippet Text: Second, gender neutral words are shown to be linearly separable from gender definition words in the word embedding.
+Related Classifications: Distributional Bias
+","Snippet Text: In a study of the risk scores assigned to more than 7,000 people in Florida's Broward County in 2013 and 2014, ProPublica found that only 20% of the people the system predicted would commit violent crimes had actually done so.
+Related Classifications: Generalization Failure
+, Snippet Text: The analysis also showed that even when controlling for prior crimes, future recidivism, age, and gender, black defendants were 45 percent more likely to be assigned higher risk scores than white defendants.
+Related Classifications: Generalization Failure
+, Snippet Text: The algorithms don't take race directly into account, but instead use data that stands in for correlative information that could stand in as a proxy. The Florida algorithm evaluated in the report is based on 137 questions, such as ""Was one of your parents ever sent to jail or prison?"" and ""How many of your friends/acquaintances are taking drugs illegally?"" Those two questions, for example, can appear to evaluate someone's empirical risk of criminality, but instead, they target those already living under institutionalized poverty and over-policing. Predominantly, those people are people of color.
+Related Classifications: Distributional Bias, Incomplete Data Attribute Capture
+, Snippet Text: The analysis also showed that even when controlling for prior crimes, future recidivism, age, and gender, black defendants were 45 percent more likely to be assigned higher risk scores than white defendants.
+Related Classifications: Distributional Bias
+, Snippet Text: ProPublic also found significant racial disparities. Although the algorithm made errors at roughly the same rate for black and white defendants, it incorrectly labelled black defendants as likely to commit further crimes at twice the reats as white defendants. Conversely, white defendants were mislabelled as low risk more often than black defendants.
+Related Classifications: Distributional Bias
+","Snippet Text: Some of the reported cases sound so concerning. For instance, it was reported that there were instances when equipment sparked while doctors were performing a procedure. Such situations resulted in a total of 193 burned patients between 2000 and 2013.
+Related Classifications: Hardware Failure
+, Snippet Text: Another incident report stated that broken pieces of the machine fell onto the bodies of the patients being operated. 
+Related Classifications: Hardware Failure
+, Snippet Text: Two deaths and 52 injuries were caused when the mechanical surgeon spontaneously powered down mid operation or made an incorrect movement
+Related Classifications: Hardware Failure
+","Snippet Text: Tempe police said the self-driving car was in autonomous mode at the time of the crash and that the vehicle hit a woman, who was walking outside of the crosswalk and later died at a hospital. 
+Related Classifications: Generalization Failure
+","Snippet Text: The plane had been repainted and rinsed by a French maintenance company three days before the test, the investigation found. Water entered these so-called angle of attack (AOA) sensors, causing them to freeze and thus skewing the avionics.
+Related Classifications: Hardware Failure
+, Snippet Text: A report in the New York Times says the erratic flight path before the high speed plunge indicated a problem with the pressure sensitive instruments near the nose of the plane.
+Related Classifications: Hardware Failure
+","Snippet Text: The researchers at Oxford and the Alan Turing Institute in London examined the editing histories of pages in 13 different language editions and recorded when bots undid other bots’ changes.
+Related Classifications: Miscoordination, Multiagent Goal Divergence
+, Snippet Text: The researchers at Oxford and the Alan Turing Institute in London examined the editing histories of pages in 13 different language editions and recorded when bots undid other bots’ changes.
+","Snippet Text: Things appear to have gone wrong for Tay because it was repeating fellow Twitter users' inflammatory statements, but Microsoft seems to have failed to consider the impact trolls could have on the experiment before it launched – The Drum has reached out to the company for comment on this process. Many users pointed out that how easily Tay was manipulated, revealed the pitfalls of machine learning.
+Related Classifications: Distributional Bias
+, Snippet Text: The problem? She started mimicking her followers.
+
+Soon, Tay began saying things like ""Hitler was right i hate the jews,"" and ""i fucking hate feminists.""
+Related Classifications: Distributional Bias
+, Snippet Text: ""This was to be expected,"" said Roman Yampolskiy, head of the CyberSecurity lab at the University of Louisville, who has published a paper on the subject of pathways to dangerous AI. ""The system is designed to learn from its users, so it will become a reflection of their behavior,"" he said. ""One needs to explicitly teach a system about what is not appropriate, like we do with children.""
+Related Classifications: Distributional Bias
+","Snippet Text: When you’re looking at the single-year teacher estimates (in this case, for 2009-10), the average spread is a pretty striking 46 percentile points in math and 62 in ELA. Furthermore, even with five years of data, the intervals are still quite large – about 30 points in math and 48 in ELA.
+Related Classifications: Input Sensitivity
+, Snippet Text: there was little correlation between how a teacher was rated in 2009 to how that same teacher was rated in 2010
+Related Classifications: Incomplete Data Attribute Capture
+, Snippet Text: For people who know education, this is shocking, but there are people who probably are not convinced by my explanation that these should be more correlated if the formulas truly measured learning. Some might think that this really just means that just like there are people who are better at math than language arts and vice versa, there are teachers who are better at teaching math than language arts and vice versa.
+Related Classifications: Underspecification
+","Snippet Text: “This is essentially finding ‘good words’ and ‘bad words,’ but it is clear that it cannot deal with any nuanced (or even just compositional) word usage.”
+Related Classifications: Context Misidentification
+, Snippet Text: For example, “racism is bad” triggers the old system into giving an overwhelmingly negative score because the words “racism” and “bad” are seen as negative, Goldberg says.
+Related Classifications: Context Misidentification
+, Snippet Text: The tool seems to rank profanity as highly toxic, while deeply harmful statements are often deemed safe
+
+
+Related Classifications: Context Misidentification
+Snippet Discussion: AI operates naively on modelled word senses.
+, Snippet Text: “Character-level models are much better able to understand misspellings and different fragments of words, but overall it’s going to do much worse,” Dixon told Quartz.
+Related Classifications: Generalization Failure
+, Snippet Text: But in real-world applications, these systems are susceptible to intelligent subversion or attacks,"" said senior author Radha Poovendran, chair of the UW electrical engineering department and director of the Network Security Lab.
+Related Classifications: Generalization Failure, Lack of Adversarial Robustness
+, Snippet Text: Designing a system with a benign operating environment in mind and deploying it in adversarial environments can have devastating consequences.""
+Related Classifications: Generalization Failure
+, Snippet Text: For example, simply changing ""idiot"" to ""idiiot"" reduced the toxicity rate of an otherwise identical comment from 84% to 20%.
+Related Classifications: Lack of Adversarial Robustness
+, Snippet Text: They showed one can subtly modify a phrase that receives a high toxicity score so that it contains the same abusive language but receives a low toxicity score.
+Related Classifications: Lack of Adversarial Robustness
+, Snippet Text: They showed that the system is vulnerable to both missing incendiary language and falsely blocking non-abusive phrases.
+Related Classifications: Lack of Adversarial Robustness
+","Snippet Text: “You’re waiting on your job to control your life,” she said, with the scheduling software used by her employer dictating everything from “how much sleep Gavin will get to what groceries I’ll be able to buy this month.”
+Related Classifications: Underspecification
+, Snippet Text: Along with virtually every major retail and restaurant chain, Starbucks relies on software that choreographs workers in precise, intricate ballets, using sales patterns and other data to determine which of its 130,000 baristas are needed in its thousands of locations and exactly when.
+Related Classifications: Underspecification
+, Snippet Text: Among other changes, the company said it would end the practice of ""clopening,"" when an employee responsible for closing a store late at night is also assigned to open it early in the morning.
+Related Classifications: Underspecification
+, Snippet Text: In a follow-up piece, the author, Jodi Kantor, points directly to Kronos' scheduling software as the root of the problem.
+Related Classifications: Underspecification
+"
+Intentional,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,33.3,33.3,0.0,33.3
+Unintentional,20.0,10.0,10.0,10.0,10.0,10.0,10.0,10.0,0.0,0.0,10.0,0.0
