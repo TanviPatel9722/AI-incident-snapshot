@@ -1,5 +1,7 @@
 # AI Incident Observatory
 
+Live dashboard: https://ai-incident-snapshot.streamlit.app/
+
 Reproducible notebook system and Streamlit dashboard for structured analysis of the AI Incident Database snapshot.
 
 ## What This Project Does
