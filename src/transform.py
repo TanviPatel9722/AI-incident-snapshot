@@ -149,6 +149,9 @@ def _aggregate_cset_harm(csetv1: pd.DataFrame | None) -> pd.DataFrame:
     tangible_harm_col = "tangible_harm" if "tangible_harm" in cols else None
     lives_lost_col = "lives_lost" if "lives_lost" in cols else None
     injuries_col = "injuries" if "injuries" in cols else None
+    ai_task_col = "ai_task" if "ai_task" in cols else None
+    ai_system_col = "ai_system" if "ai_system" in cols else None
+    sector_col = "sector_of_deployment" if "sector_of_deployment" in cols else None
 
     grp = cset.groupby("incident_id", dropna=False)
     out = grp.size().rename("cset_annotations").reset_index()
@@ -162,6 +165,15 @@ def _aggregate_cset_harm(csetv1: pd.DataFrame | None) -> pd.DataFrame:
     if tangible_harm_col:
         th = grp[tangible_harm_col].agg(_safe_top_value).rename("tangible_harm_top").reset_index()
         out = out.merge(th, on="incident_id", how="left")
+    if ai_task_col:
+        ai_task = grp[ai_task_col].agg(_safe_top_value).rename("ai_task_top").reset_index()
+        out = out.merge(ai_task, on="incident_id", how="left")
+    if ai_system_col:
+        ai_system = grp[ai_system_col].agg(_safe_top_value).rename("ai_system_top").reset_index()
+        out = out.merge(ai_system, on="incident_id", how="left")
+    if sector_col:
+        sector = grp[sector_col].agg(_safe_top_value).rename("sector_of_deployment_top").reset_index()
+        out = out.merge(sector, on="incident_id", how="left")
 
     if lives_lost_col:
         vals = pd.to_numeric(cset[lives_lost_col], errors="coerce")
@@ -173,6 +185,63 @@ def _aggregate_cset_harm(csetv1: pd.DataFrame | None) -> pd.DataFrame:
         out = out.merge(inj.rename("injuries_max").reset_index(), on="incident_id", how="left")
 
     return out
+
+
+def _aggregate_mit_taxonomy(mit: pd.DataFrame | None) -> pd.DataFrame:
+    if mit is None or mit.empty:
+        return pd.DataFrame(columns=["incident_id"])
+    mit_norm = _normalize_incident_id_column(normalize_columns(mit))
+    if mit_norm is None or "incident_id" not in mit_norm.columns:
+        return pd.DataFrame(columns=["incident_id"])
+
+    cols = mit_norm.columns
+    risk_domain_col = "risk_domain" if "risk_domain" in cols else ("domain" if "domain" in cols else None)
+    risk_subdomain_col = "risk_subdomain" if "risk_subdomain" in cols else None
+    intent_col = "intent" if "intent" in cols else None
+    entity_col = "entity" if "entity" in cols else None
+    timing_col = "timing" if "timing" in cols else None
+
+    grp = mit_norm.groupby("incident_id", dropna=False)
+    out = grp.size().rename("mit_annotations").reset_index()
+
+    if risk_domain_col:
+        dom = grp[risk_domain_col].agg(_safe_top_value).rename("mit_risk_domain_top").reset_index()
+        out = out.merge(dom, on="incident_id", how="left")
+    if risk_subdomain_col:
+        sub = grp[risk_subdomain_col].agg(_safe_top_value).rename("mit_risk_subdomain_top").reset_index()
+        out = out.merge(sub, on="incident_id", how="left")
+    if intent_col:
+        intent = grp[intent_col].agg(_safe_top_value).rename("mit_intent_top").reset_index()
+        out = out.merge(intent, on="incident_id", how="left")
+    if entity_col:
+        entity = grp[entity_col].agg(_safe_top_value).rename("mit_entity_top").reset_index()
+        out = out.merge(entity, on="incident_id", how="left")
+    if timing_col:
+        timing = grp[timing_col].agg(_safe_top_value).rename("mit_timing_top").reset_index()
+        out = out.merge(timing, on="incident_id", how="left")
+
+    return out
+
+
+def _aggregate_gmf_purpose(gmf: pd.DataFrame | None) -> pd.DataFrame:
+    if gmf is None or gmf.empty:
+        return pd.DataFrame(columns=["incident_id"])
+    gmf_norm = _normalize_incident_id_column(normalize_columns(gmf))
+    if gmf_norm is None or "incident_id" not in gmf_norm.columns:
+        return pd.DataFrame(columns=["incident_id"])
+
+    purpose_candidates = [
+        "known_ai_goal",
+        "potential_ai_goal",
+        "known_ai_technology",
+        "potential_ai_technology",
+    ]
+    purpose_col = next((c for c in purpose_candidates if c in gmf_norm.columns), None)
+    if purpose_col is None:
+        return pd.DataFrame(columns=["incident_id"])
+
+    grouped = gmf_norm.groupby("incident_id", dropna=False)[purpose_col].agg(_safe_top_value)
+    return grouped.rename("gmf_goal_top").reset_index()
 
 
 def build_incident_overview(tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -234,6 +303,23 @@ def build_incident_overview(tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
     harm = _aggregate_cset_harm(tables.get("csetv1"))
     if not harm.empty and "incident_id" in overview.columns:
         overview = overview.merge(harm, on="incident_id", how="left")
+    mit_taxonomy = _aggregate_mit_taxonomy(tables.get("mit"))
+    if not mit_taxonomy.empty and "incident_id" in overview.columns:
+        overview = overview.merge(mit_taxonomy, on="incident_id", how="left")
+    gmf_purpose = _aggregate_gmf_purpose(tables.get("gmf"))
+    if not gmf_purpose.empty and "incident_id" in overview.columns:
+        overview = overview.merge(gmf_purpose, on="incident_id", how="left")
+
+    # Build a single incident-level purpose view to support trend analysis across snapshots.
+    if "primary_purpose_top" not in overview.columns:
+        overview["primary_purpose_top"] = ""
+
+    for source_col in ["ai_task_top", "gmf_goal_top", "ai_system_top"]:
+        if source_col in overview.columns:
+            source_vals = overview[source_col].fillna("").astype(str).str.strip()
+            current = overview["primary_purpose_top"].fillna("").astype(str).str.strip()
+            take_source = current.eq("") & source_vals.ne("") & source_vals.ne("nan")
+            overview.loc[take_source, "primary_purpose_top"] = source_vals[take_source]
 
     # Add boolean helpers for alleged parties from incident core table.
     for src_col, out_col in [

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import re
 import tempfile
 import urllib.parse
 import urllib.request
@@ -36,6 +38,11 @@ build_incident_overview = _transform_mod.build_incident_overview
 
 
 REQUIRED_CUSTOM_FILES = {"incidents.csv", "reports.csv"}
+MAX_BAR_ITEMS = 15
+MAX_SMALL_MULTIPLES = 8
+MAX_STACKED_SERIES = 7
+MAX_DEVELOPER_ITEMS = 10
+RECENT_WINDOW_YEARS = 3
 
 
 def _download_snapshot(url: str, target_dir: Path) -> Path:
@@ -142,6 +149,88 @@ def _best_date_column(df: pd.DataFrame) -> str | None:
     return max(date_candidates, key=lambda c: df[c].notna().sum())
 
 
+def _first_existing_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _has_non_empty_text(df: pd.DataFrame, col: str) -> bool:
+    if col not in df.columns:
+        return False
+    vals = df[col].fillna("").astype(str).str.strip()
+    vals = vals[(vals != "") & (vals.str.lower() != "nan")]
+    return not vals.empty
+
+
+def _pick_report_id_column(reports: pd.DataFrame) -> str | None:
+    return _first_existing_column(reports, ["_id", "report_id", "id"])
+
+
+def _pick_source_domain_column(reports: pd.DataFrame) -> str | None:
+    candidates = [
+        "source_domain",
+        "domain",
+        "source",
+        "source_site",
+        "publisher",
+        "source_name",
+    ]
+    for col in candidates:
+        if _has_non_empty_text(reports, col):
+            return col
+    return None
+
+
+def _pick_primary_purpose_column(df: pd.DataFrame) -> tuple[str | None, str]:
+    candidates = [
+        ("primary_purpose_top", "Merged Primary Purpose"),
+        ("gmf_goal_top", "GMF Goal"),
+        ("ai_task_top", "CSET AI Task"),
+        ("ai_system_top", "CSET AI System"),
+    ]
+    for col, source in candidates:
+        if _has_non_empty_text(df, col):
+            return col, source
+    return None, ""
+
+
+def _pick_developer_column(df: pd.DataFrame) -> tuple[str | None, str]:
+    candidates = [
+        ("alleged_developer_of_ai_system", "Incidents Alleged Developer"),
+        ("alleged_developer", "Incidents Alleged Developer"),
+        ("developer", "Incidents Developer"),
+    ]
+    for col, source in candidates:
+        if _has_non_empty_text(df, col):
+            return col, source
+    return None, ""
+
+
+def _top_n_for_unique_count(unique_count: int, max_n: int) -> int:
+    if unique_count <= 0:
+        return 0
+    return max(4, min(max_n, unique_count))
+
+
+def _recent_window(df: pd.DataFrame, date_col: str | None) -> tuple[pd.DataFrame, str]:
+    if date_col is None or date_col not in df.columns:
+        return df.copy(), "All years"
+    years = _clean_date_series(df[date_col]).dt.year.dropna()
+    if years.empty:
+        return df.copy(), "All years"
+    latest_year = int(years.max())
+    earliest_year = int(years.min())
+    cutoff_year = max(earliest_year, latest_year - (RECENT_WINDOW_YEARS - 1))
+    window_df = df.copy()
+    window_df["_year"] = _clean_date_series(window_df[date_col]).dt.year
+    window_df = window_df[window_df["_year"] >= cutoff_year].copy()
+    if window_df.empty:
+        return df.copy(), f"{earliest_year}-{latest_year}"
+    return window_df, f"{cutoff_year}-{latest_year}"
+
+
 def _clean_date_series(series: pd.Series) -> pd.Series:
     parsed = pd.to_datetime(series, errors="coerce", utc=True)
     min_dt = pd.Timestamp("1980-01-01", tz="UTC")
@@ -150,18 +239,227 @@ def _clean_date_series(series: pd.Series) -> pd.Series:
     return parsed
 
 
+def _parse_listlike_text(value) -> list[str]:
+    if pd.isna(value):
+        return []
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return []
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, list):
+                raw_items = parsed
+            else:
+                raw_items = [text]
+        except Exception:
+            if "," in text:
+                raw_items = [p.strip() for p in text.split(",")]
+            else:
+                raw_items = [text]
+
+    clean_items: list[str] = []
+    for item in raw_items:
+        item_text = str(item).strip().strip("\"'").strip()
+        if not item_text:
+            continue
+        lower_text = item_text.lower()
+        if lower_text in {"nan", "none", "null", "n/a", "na", "unknown", "unidentified", "[]"}:
+            clean_items.append("Unknown")
+        else:
+            clean_items.append(item_text)
+    return clean_items
+
+
+def _clean_domain_label(value: str) -> str:
+    label = str(value).strip()
+    if not label:
+        return ""
+    # MIT risk domains can be prefixed like "4. Malicious Actors & Misuse".
+    label = re.sub(r"^\s*\d+(?:\.\d+)*\s*[\.\-:)]\s*", "", label)
+    return label.strip()
+
+
+def _pick_emerging_domain_column(df: pd.DataFrame) -> tuple[str | None, str]:
+    candidates = [
+        ("mit_risk_domain_top", "MIT Risk Domain"),
+        ("harm_domain_top", "CSET Harm Domain"),
+    ]
+    for col, source in candidates:
+        if _has_non_empty_text(df, col):
+            return col, source
+    return None, ""
+
+
+def _prepare_emerging_domain_pivot(
+    filtered_incidents: pd.DataFrame,
+    date_col: str | None,
+) -> tuple[pd.DataFrame | None, str, str]:
+    if date_col is None or date_col not in filtered_incidents.columns:
+        return None, "", "Harm-domain trend requires a usable incident date column."
+
+    domain_col, domain_source = _pick_emerging_domain_column(filtered_incidents)
+    if domain_col is None:
+        return None, "", "No harm domain column available. Need MIT risk domain or CSET harm domain."
+
+    harm_df = filtered_incidents.copy()
+    harm_df["_year"] = _clean_date_series(harm_df[date_col]).dt.year
+    harm_df["_domain"] = (
+        harm_df[domain_col]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .map(_clean_domain_label)
+    )
+    harm_df = harm_df[(harm_df["_year"].notna()) & (harm_df["_domain"] != "")]
+    if harm_df.empty:
+        return None, "", f"No usable {domain_source.lower()} records available for trend analysis."
+
+    top_n = _top_n_for_unique_count(harm_df["_domain"].nunique(), MAX_SMALL_MULTIPLES)
+    top_domains = harm_df["_domain"].value_counts().head(top_n).index.tolist()
+    trend = (
+        harm_df[harm_df["_domain"].isin(top_domains)]
+        .groupby(["_year", "_domain"])
+        .size()
+        .reset_index(name="count")
+    )
+    pivot = trend.pivot(index="_year", columns="_domain", values="count").fillna(0).sort_index()
+    if pivot.empty:
+        return None, "", f"No trend points available for {domain_source.lower()} small multiples."
+    return pivot, domain_source, ""
+
+
+def _render_emerging_harm_domains(filtered_incidents: pd.DataFrame, date_col: str | None) -> None:
+    pivot, domain_source, err = _prepare_emerging_domain_pivot(filtered_incidents, date_col)
+    if pivot is None:
+        st.info(err)
+        return
+
+    num_panels = len(pivot.columns)
+    rows = 2 if num_panels > 4 else 1
+    cols = 4 if num_panels > 1 else 1
+    fig, axes = plt.subplots(rows, cols, figsize=(16, 7 if rows == 2 else 4), sharex=True)
+    axes_list = axes.flatten() if hasattr(axes, "flatten") else [axes]
+
+    for i, domain_name in enumerate(pivot.columns):
+        ax = axes_list[i]
+        pivot[domain_name].plot(ax=ax, lw=2)
+        ax.set_title(domain_name)
+        ax.set_xlabel("Year")
+        ax.set_ylabel("Incidents")
+        ax.grid(alpha=0.2)
+
+    for j in range(num_panels, len(axes_list)):
+        axes_list[j].axis("off")
+
+    fig.suptitle(f"Emerging AI Harm Domains Over Time ({domain_source})", fontsize=14, y=1.02)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
+def _render_primary_purpose_stacked_trend(filtered_incidents: pd.DataFrame, date_col: str | None) -> None:
+    if date_col is None or date_col not in filtered_incidents.columns:
+        st.info("Primary-purpose trend requires a usable incident date column.")
+        return
+    purpose_col, purpose_source = _pick_primary_purpose_column(filtered_incidents)
+    if purpose_col is None:
+        st.info("Primary-purpose trend requires a usable purpose field from taxonomy tables.")
+        return
+
+    purpose_df = filtered_incidents.copy()
+    purpose_df["_year"] = _clean_date_series(purpose_df[date_col]).dt.year
+    purpose_df["_purpose"] = purpose_df[purpose_col].fillna("").astype(str).str.strip()
+    purpose_df = purpose_df[(purpose_df["_year"].notna()) & (purpose_df["_purpose"] != "")]
+
+    if purpose_df.empty:
+        st.info("No usable primary-purpose records available for stacked trend analysis.")
+        return
+
+    top_n = _top_n_for_unique_count(purpose_df["_purpose"].nunique(), MAX_STACKED_SERIES)
+    top_purposes = purpose_df["_purpose"].value_counts().head(top_n).index.tolist()
+    trend_df = (
+        purpose_df[purpose_df["_purpose"].isin(top_purposes)]
+        .groupby(["_year", "_purpose"])
+        .size()
+        .reset_index(name="count")
+    )
+    pivot = trend_df.pivot(index="_year", columns="_purpose", values="count").fillna(0).sort_index()
+    if pivot.empty:
+        st.info("No trend points available for primary-purpose stacked chart.")
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.stackplot(
+        pivot.index.to_list(),
+        [pivot[c].values for c in pivot.columns],
+        labels=pivot.columns,
+        alpha=0.9,
+    )
+    ax.set_title(f"Incidents per Year by AI System Primary Purpose ({purpose_source})")
+    ax.set_xlabel("Year")
+    ax.set_ylabel("Incident count")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8)
+    ax.grid(alpha=0.2)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
+def _render_developer_identification_chart(filtered_incidents: pd.DataFrame, date_col: str | None) -> None:
+    developer_col, developer_source = _pick_developer_column(filtered_incidents)
+    if developer_col is None:
+        st.info("Developer analysis requires a usable developer field in incidents.")
+        return
+
+    recent_df, recent_window_label = _recent_window(filtered_incidents, date_col)
+
+    exploded = recent_df[developer_col].apply(_parse_listlike_text).explode().dropna()
+    if exploded.empty:
+        st.info("No usable developer records available for developer-identification analysis.")
+        return
+
+    dev_counts = exploded.astype(str).str.strip()
+    dev_counts = dev_counts[dev_counts != ""].value_counts().head(MAX_DEVELOPER_ITEMS)
+    if dev_counts.empty:
+        st.info("No developer counts available after normalization.")
+        return
+
+    labels = dev_counts.index.tolist()
+    values = dev_counts.values.tolist()
+    colors = ["#d62728" if lbl.lower() == "unknown" else "#9e9e9e" for lbl in labels]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.barh(labels[::-1], values[::-1], color=colors[::-1])
+    ax.set_title(f"Top Alleged Developers ({recent_window_label})")
+    ax.set_xlabel("Incident count")
+    ax.grid(axis="x", alpha=0.2)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    unknown_count = int(dev_counts.get("Unknown", 0))
+    unknown_share = (unknown_count / int(dev_counts.sum()) * 100) if int(dev_counts.sum()) > 0 else 0.0
+    st.caption(f"Unknown developer share within displayed top developers: {unknown_share:.1f}%")
+    st.caption(f"Developer source field: {developer_source}")
+
+
 def _data_quality_summary(
     incidents: pd.DataFrame,
     reports: pd.DataFrame,
     date_col: str | None,
     clean_dates: pd.Series | None,
 ) -> pd.DataFrame:
+    source_col = _pick_source_domain_column(reports)
+    report_id_col = _pick_report_id_column(reports)
     incident_dupes = (
         int(incidents["incident_id"].duplicated().sum()) if "incident_id" in incidents.columns else 0
     )
-    report_dupes = int(reports["_id"].duplicated().sum()) if "_id" in reports.columns else 0
+    report_dupes = int(reports[report_id_col].duplicated().sum()) if report_id_col else 0
     missing_source = (
-        float(reports["source_domain"].isna().mean() * 100) if "source_domain" in reports.columns else 0.0
+        float(reports[source_col].isna().mean() * 100) if source_col else 0.0
     )
     invalid_date_rows = 0
     if date_col is not None and clean_dates is not None:
@@ -174,8 +472,8 @@ def _data_quality_summary(
                 "Incident rows",
                 "Report rows",
                 "Duplicate incident_id rows",
-                "Duplicate report _id rows",
-                "Missing source_domain (%)",
+                f"Duplicate report {report_id_col or 'id'} rows",
+                f"Missing {source_col or 'source'} (%)",
                 "Out-of-range/invalid incident dates",
             ],
             "Value": [
@@ -195,6 +493,7 @@ def _build_pdf_report(
     filtered_reports: pd.DataFrame,
     date_col: str | None,
     selected_domains: list[str],
+    selected_domain_col: str | None,
     taxonomy_name: str,
     selected_tax_vals: list[str],
 ) -> bytes:
@@ -235,7 +534,7 @@ def _build_pdf_report(
             f"- Total evidence records: {evidence_total:,}",
             "",
             "Applied filters",
-            f"- Source domains filter: {', '.join(selected_domains) if selected_domains else 'All'}",
+            f"- {selected_domain_col or 'Source domains'} filter: {', '.join(selected_domains) if selected_domains else 'All'}",
             f"- Taxonomy table: {taxonomy_name}",
             f"- Taxonomy values: {', '.join(selected_tax_vals) if selected_tax_vals else 'All'}",
         ]
@@ -277,33 +576,37 @@ def _build_pdf_report(
         ax1 = fig.add_subplot(211)
         ax2 = fig.add_subplot(212)
 
+        source_domain_col = _pick_source_domain_column(filtered_reports)
         domain_counts = (
-            filtered_reports["source_domain"].dropna().astype(str).value_counts().head(15)
-            if "source_domain" in filtered_reports.columns
+            filtered_reports[source_domain_col].dropna().astype(str).value_counts().head(MAX_BAR_ITEMS)
+            if source_domain_col is not None
             else pd.Series(dtype=int)
         )
         if not domain_counts.empty:
             domain_counts.sort_values().plot(kind="barh", ax=ax1)
-            ax1.set_title("Top Report Source Domains")
+            ax1.set_title(f"Top Report {source_domain_col.replace('_', ' ').title()} Values")
             ax1.set_xlabel("Count")
         else:
             ax1.axis("off")
             ax1.text(0.0, 0.5, "No source domain data available.", fontsize=12)
 
-        harm_counts = (
-            filtered_incidents["harm_domain_top"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .value_counts()
-            .head(15)
-            if "harm_domain_top" in filtered_incidents.columns
-            else pd.Series(dtype=int)
-        )
-        harm_counts = harm_counts[harm_counts.index != ""]
+        harm_col, harm_source = _pick_emerging_domain_column(filtered_incidents)
+        if harm_col is not None:
+            harm_counts = (
+                filtered_incidents[harm_col]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .map(_clean_domain_label)
+                .value_counts()
+                .head(MAX_BAR_ITEMS)
+            )
+            harm_counts = harm_counts[harm_counts.index != ""]
+        else:
+            harm_counts = pd.Series(dtype=int)
         if not harm_counts.empty:
             harm_counts.sort_values().plot(kind="barh", ax=ax2)
-            ax2.set_title("Top Harm Domains (CSET)")
+            ax2.set_title(f"Top Harm Domains ({harm_source})")
             ax2.set_xlabel("Count")
         else:
             ax2.axis("off")
@@ -348,7 +651,7 @@ def _build_pdf_report(
             )
             harm_lvl = harm_lvl[harm_lvl != ""]
             if not harm_lvl.empty:
-                harm_lvl.value_counts().head(10).sort_values().plot(kind="barh", ax=ax3)
+                harm_lvl.value_counts().head(MAX_BAR_ITEMS).sort_values().plot(kind="barh", ax=ax3)
                 ax3.set_title("AI Harm Levels (Top)")
                 ax3.set_xlabel("Count")
             else:
@@ -393,6 +696,60 @@ def _fig_to_png_bytes(fig) -> bytes:
     return buf.getvalue()
 
 
+def _available_graph_options(
+    filtered_incidents: pd.DataFrame,
+    filtered_reports: pd.DataFrame,
+    date_col: str | None,
+) -> list[str]:
+    options: list[str] = []
+
+    if date_col is not None and date_col in filtered_incidents.columns:
+        valid_dates = _clean_date_series(filtered_incidents[date_col]).dropna()
+        if not valid_dates.empty:
+            options.append("Incidents Over Time")
+
+    source_domain_col = _pick_source_domain_column(filtered_reports)
+    if source_domain_col is not None and _has_non_empty_text(filtered_reports, source_domain_col):
+        options.append("Top Report Source Domains")
+
+    harm_col, _harm_source = _pick_emerging_domain_column(filtered_incidents)
+    if harm_col is not None:
+        options.append("Top Harm Domains")
+        if date_col is not None and date_col in filtered_incidents.columns:
+            pivot, _source, _err = _prepare_emerging_domain_pivot(filtered_incidents, date_col)
+            if pivot is not None:
+                options.append("Emerging Harm Domains (Small Multiples)")
+
+    if "report_count" in filtered_incidents.columns:
+        options.append("Report Count Distribution")
+    if "evidence_total" in filtered_incidents.columns:
+        options.append("Evidence Total Distribution")
+    if _has_non_empty_text(filtered_incidents, "ai_harm_level_top"):
+        options.append("AI Harm Levels")
+
+    purpose_col, _purpose_source = _pick_primary_purpose_column(filtered_incidents)
+    if (
+        purpose_col is not None
+        and date_col is not None
+        and date_col in filtered_incidents.columns
+    ):
+        preview = filtered_incidents.copy()
+        preview["_year"] = _clean_date_series(preview[date_col]).dt.year
+        preview["_purpose"] = preview[purpose_col].fillna("").astype(str).str.strip()
+        preview = preview[(preview["_year"].notna()) & (preview["_purpose"] != "")]
+        if not preview.empty:
+            options.append("Primary Purpose Stacked Trend")
+
+    developer_col, _developer_source = _pick_developer_column(filtered_incidents)
+    if developer_col is not None:
+        preview, _window_label = _recent_window(filtered_incidents, date_col)
+        exploded = preview[developer_col].apply(_parse_listlike_text).explode().dropna()
+        if not exploded.empty:
+            options.append("Top Developers (Recent)")
+
+    return list(dict.fromkeys(options))
+
+
 def _build_single_graph_png(
     graph_key: str,
     filtered_incidents: pd.DataFrame,
@@ -420,28 +777,31 @@ def _build_single_graph_png(
         return _fig_to_png_bytes(fig), "incidents_over_time.png", ""
 
     if graph_key == "Top Report Source Domains":
-        if "source_domain" not in filtered_reports.columns:
-            return None, "top_report_source_domains.png", "source_domain column not available."
-        counts = filtered_reports["source_domain"].dropna().astype(str).value_counts().head(15)
+        source_domain_col = _pick_source_domain_column(filtered_reports)
+        if source_domain_col is None:
+            return None, "top_report_source_domains.png", "No usable source/domain column available."
+        counts = filtered_reports[source_domain_col].dropna().astype(str).value_counts().head(MAX_BAR_ITEMS)
         if counts.empty:
             return None, "top_report_source_domains.png", "No source domain data available."
         fig = plt.figure(figsize=(10, 5))
         ax = fig.add_subplot(111)
         counts.sort_values().plot(kind="barh", ax=ax)
-        ax.set_title("Top Report Source Domains")
+        ax.set_title(f"Top Report {source_domain_col.replace('_', ' ').title()} Values")
         ax.set_xlabel("Count")
         return _fig_to_png_bytes(fig), "top_report_source_domains.png", ""
 
     if graph_key == "Top Harm Domains":
-        if "harm_domain_top" not in filtered_incidents.columns:
-            return None, "top_harm_domains.png", "harm_domain_top column not available."
+        harm_col, harm_source = _pick_emerging_domain_column(filtered_incidents)
+        if harm_col is None:
+            return None, "top_harm_domains.png", "No usable harm-domain column available."
         counts = (
-            filtered_incidents["harm_domain_top"]
+            filtered_incidents[harm_col]
             .dropna()
             .astype(str)
             .str.strip()
+            .map(_clean_domain_label)
             .value_counts()
-            .head(15)
+            .head(MAX_BAR_ITEMS)
         )
         counts = counts[counts.index != ""]
         if counts.empty:
@@ -449,7 +809,7 @@ def _build_single_graph_png(
         fig = plt.figure(figsize=(10, 5))
         ax = fig.add_subplot(111)
         counts.sort_values().plot(kind="barh", ax=ax)
-        ax.set_title("Top Harm Domains (CSET)")
+        ax.set_title(f"Top Harm Domains ({harm_source})")
         ax.set_xlabel("Count")
         return _fig_to_png_bytes(fig), "top_harm_domains.png", ""
 
@@ -490,7 +850,7 @@ def _build_single_graph_png(
             .astype(str)
             .str.strip()
             .value_counts()
-            .head(15)
+            .head(MAX_BAR_ITEMS)
         )
         counts = counts[counts.index != ""]
         if counts.empty:
@@ -501,6 +861,89 @@ def _build_single_graph_png(
         ax.set_title("AI Harm Levels")
         ax.set_xlabel("Count")
         return _fig_to_png_bytes(fig), "ai_harm_levels.png", ""
+
+    if graph_key == "Emerging Harm Domains (Small Multiples)":
+        pivot, domain_source, err = _prepare_emerging_domain_pivot(filtered_incidents, date_col)
+        if pivot is None:
+            return None, "emerging_harm_domains.png", err
+        num_panels = len(pivot.columns)
+        rows = 2 if num_panels > 4 else 1
+        cols = 4 if num_panels > 1 else 1
+        fig, axes = plt.subplots(rows, cols, figsize=(16, 7 if rows == 2 else 4), sharex=True)
+        axes_list = axes.flatten() if hasattr(axes, "flatten") else [axes]
+        for i, domain_name in enumerate(pivot.columns):
+            ax = axes_list[i]
+            pivot[domain_name].plot(ax=ax, lw=2)
+            ax.set_title(domain_name)
+            ax.set_xlabel("Year")
+            ax.set_ylabel("Incidents")
+            ax.grid(alpha=0.2)
+        for j in range(num_panels, len(axes_list)):
+            axes_list[j].axis("off")
+        fig.suptitle(f"Emerging AI Harm Domains Over Time ({domain_source})", fontsize=14, y=1.02)
+        fig.tight_layout()
+        return _fig_to_png_bytes(fig), "emerging_harm_domains.png", ""
+
+    if graph_key == "Primary Purpose Stacked Trend":
+        if date_col is None or date_col not in filtered_incidents.columns:
+            return None, "primary_purpose_stacked_trend.png", "No incident date column available."
+        purpose_col, purpose_source = _pick_primary_purpose_column(filtered_incidents)
+        if purpose_col is None:
+            return None, "primary_purpose_stacked_trend.png", "No usable primary-purpose column available."
+        purpose_df = filtered_incidents.copy()
+        purpose_df["_year"] = _clean_date_series(purpose_df[date_col]).dt.year
+        purpose_df["_purpose"] = purpose_df[purpose_col].fillna("").astype(str).str.strip()
+        purpose_df = purpose_df[(purpose_df["_year"].notna()) & (purpose_df["_purpose"] != "")]
+        if purpose_df.empty:
+            return None, "primary_purpose_stacked_trend.png", "No usable primary-purpose trend data available."
+        top_n = _top_n_for_unique_count(purpose_df["_purpose"].nunique(), MAX_STACKED_SERIES)
+        top_purposes = purpose_df["_purpose"].value_counts().head(top_n).index.tolist()
+        trend_df = (
+            purpose_df[purpose_df["_purpose"].isin(top_purposes)]
+            .groupby(["_year", "_purpose"])
+            .size()
+            .reset_index(name="count")
+        )
+        pivot = trend_df.pivot(index="_year", columns="_purpose", values="count").fillna(0).sort_index()
+        if pivot.empty:
+            return None, "primary_purpose_stacked_trend.png", "No trend points available."
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.stackplot(
+            pivot.index.to_list(),
+            [pivot[c].values for c in pivot.columns],
+            labels=pivot.columns,
+            alpha=0.9,
+        )
+        ax.set_title(f"Incidents per Year by AI System Primary Purpose ({purpose_source})")
+        ax.set_xlabel("Year")
+        ax.set_ylabel("Incident count")
+        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8)
+        ax.grid(alpha=0.2)
+        fig.tight_layout()
+        return _fig_to_png_bytes(fig), "primary_purpose_stacked_trend.png", ""
+
+    if graph_key == "Top Developers (Recent)":
+        developer_col, _developer_source = _pick_developer_column(filtered_incidents)
+        if developer_col is None:
+            return None, "top_developers_recent.png", "No usable developer column available."
+        recent_df, recent_window_label = _recent_window(filtered_incidents, date_col)
+        exploded = recent_df[developer_col].apply(_parse_listlike_text).explode().dropna()
+        if exploded.empty:
+            return None, "top_developers_recent.png", "No usable developer records available."
+        dev_counts = exploded.astype(str).str.strip()
+        dev_counts = dev_counts[dev_counts != ""].value_counts().head(MAX_DEVELOPER_ITEMS)
+        if dev_counts.empty:
+            return None, "top_developers_recent.png", "No developer counts available after normalization."
+        labels = dev_counts.index.tolist()
+        values = dev_counts.values.tolist()
+        colors = ["#d62728" if lbl.lower() == "unknown" else "#9e9e9e" for lbl in labels]
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.barh(labels[::-1], values[::-1], color=colors[::-1])
+        ax.set_title(f"Top Alleged Developers ({recent_window_label})")
+        ax.set_xlabel("Incident count")
+        ax.grid(axis="x", alpha=0.2)
+        fig.tight_layout()
+        return _fig_to_png_bytes(fig), "top_developers_recent.png", ""
 
     return None, "graph.png", "Unknown graph selection."
 
@@ -513,6 +956,7 @@ def _render_summary(data: dict[str, object]) -> None:
 
     date_col = _best_date_column(overview)
     clean_dates = _clean_date_series(overview[date_col]) if date_col else None
+    source_domain_col = _pick_source_domain_column(reports)
 
     st.subheader("Filters")
     c1, c2, c3 = st.columns(3)
@@ -532,12 +976,12 @@ def _render_summary(data: dict[str, object]) -> None:
             start_date, end_date = date_range
 
     selected_domains: list[str] = []
-    if "source_domain" in reports.columns:
+    if source_domain_col is not None:
         domain_vals = sorted(
-            reports["source_domain"].dropna().astype(str).unique().tolist()
+            reports[source_domain_col].dropna().astype(str).unique().tolist()
         )
         selected_domains = c2.multiselect(
-            "Report source domains",
+            f"Report {source_domain_col.replace('_', ' ')}",
             options=domain_vals,
             default=[],
             help="Leave empty to include all domains.",
@@ -560,9 +1004,9 @@ def _render_summary(data: dict[str, object]) -> None:
         if date_col in filtered_incidents.columns:
             filtered_incidents[date_col] = _clean_date_series(filtered_incidents[date_col])
 
-    if selected_domains and "source_domain" in filtered_reports.columns:
+    if selected_domains and source_domain_col is not None and source_domain_col in filtered_reports.columns:
         filtered_reports = filtered_reports[
-            filtered_reports["source_domain"].astype(str).isin(selected_domains)
+            filtered_reports[source_domain_col].astype(str).isin(selected_domains)
         ].copy()
 
     if (
@@ -636,12 +1080,15 @@ def _render_summary(data: dict[str, object]) -> None:
                 f"Date coverage: {valid_dates.min().date()} to {valid_dates.max().date()} "
                 f"({len(valid_dates):,} incidents with valid dates)."
             )
-    if "source_domain" in filtered_reports.columns and not filtered_reports.empty:
+    if source_domain_col is not None and source_domain_col in filtered_reports.columns and not filtered_reports.empty:
         top_domain = (
-            filtered_reports["source_domain"].dropna().astype(str).value_counts().head(1)
+            filtered_reports[source_domain_col].dropna().astype(str).value_counts().head(1)
         )
         if not top_domain.empty:
-            st.write(f"Most frequent source domain: `{top_domain.index[0]}` ({int(top_domain.iloc[0])} reports).")
+            st.write(
+                f"Most frequent {source_domain_col.replace('_', ' ')}: "
+                f"`{top_domain.index[0]}` ({int(top_domain.iloc[0])} reports)."
+            )
     if "report_count" in filtered_incidents.columns and not filtered_incidents.empty:
         p90 = filtered_incidents["report_count"].quantile(0.9)
         st.write(f"Report count concentration: 90th percentile is {p90:.2f} reports/incident.")
@@ -661,10 +1108,10 @@ def _render_summary(data: dict[str, object]) -> None:
             st.subheader("Incidents Over Time")
             st.line_chart(ts)
 
-    if "source_domain" in filtered_reports.columns:
+    if source_domain_col is not None and source_domain_col in filtered_reports.columns:
         st.subheader("Top Report Source Domains")
         top_domains = (
-            filtered_reports["source_domain"].dropna().astype(str).value_counts().head(15)
+            filtered_reports[source_domain_col].dropna().astype(str).value_counts().head(MAX_BAR_ITEMS)
         )
         if not top_domains.empty:
             st.bar_chart(top_domains.sort_values())
@@ -677,11 +1124,17 @@ def _render_summary(data: dict[str, object]) -> None:
         else 0.0
     )
     h1.metric("Incidents With Alleged Harmed Party", f"{harmed_pct:.1f}%")
+    coverage_col = "cset_annotations" if "cset_annotations" in filtered_incidents.columns else (
+        "mit_annotations" if "mit_annotations" in filtered_incidents.columns else None
+    )
+    coverage_label = (
+        "CSET Harm-Annotated Incidents"
+        if coverage_col == "cset_annotations"
+        else ("MIT Taxonomy-Annotated Incidents" if coverage_col == "mit_annotations" else "Taxonomy-Annotated Incidents")
+    )
     h2.metric(
-        "CSET Harm-Annotated Incidents",
-        f"{int(filtered_incidents['cset_annotations'].fillna(0).gt(0).sum()):,}"
-        if "cset_annotations" in filtered_incidents.columns
-        else "0",
+        coverage_label,
+        f"{int(filtered_incidents[coverage_col].fillna(0).gt(0).sum()):,}" if coverage_col else "0",
     )
     if "lives_lost_max" in filtered_incidents.columns:
         ll_series = pd.to_numeric(filtered_incidents["lives_lost_max"], errors="coerce").fillna(0)
@@ -692,17 +1145,19 @@ def _render_summary(data: dict[str, object]) -> None:
         f"{int(ll_series.gt(0).sum()):,}",
     )
 
-    if "harm_domain_top" in filtered_incidents.columns:
+    harm_col, harm_source = _pick_emerging_domain_column(filtered_incidents)
+    if harm_col is not None:
         harm_domain = (
-            filtered_incidents["harm_domain_top"]
+            filtered_incidents[harm_col]
             .dropna()
             .astype(str)
             .str.strip()
+            .map(_clean_domain_label)
         )
         harm_domain = harm_domain[harm_domain != ""]
         if not harm_domain.empty:
-            st.write("Top Harm Domains (CSET)")
-            st.bar_chart(harm_domain.value_counts().head(15).sort_values())
+            st.write(f"Top Harm Domains ({harm_source})")
+            st.bar_chart(harm_domain.value_counts().head(MAX_BAR_ITEMS).sort_values())
 
     if "ai_harm_level_top" in filtered_incidents.columns:
         harm_lvl = (
@@ -715,6 +1170,14 @@ def _render_summary(data: dict[str, object]) -> None:
         if not harm_lvl.empty:
             st.write("AI Harm Levels (CSET)")
             st.bar_chart(harm_lvl.value_counts().sort_values())
+
+    st.subheader("Snapshot Pattern Analysis")
+    st.write("### New Kinds of AI Harm Are Emerging")
+    _render_emerging_harm_domains(filtered_incidents, date_col)
+    st.write("### Incidents by AI System Primary Purpose")
+    _render_primary_purpose_stacked_trend(filtered_incidents, date_col)
+    st.write("### Developers Usually Go Unidentified")
+    _render_developer_identification_chart(filtered_incidents, date_col)
 
     st.subheader("Data Quality")
     quality_df = _data_quality_summary(overview, reports, date_col, clean_dates)
@@ -739,6 +1202,7 @@ def _render_summary(data: dict[str, object]) -> None:
         filtered_reports=filtered_reports,
         date_col=date_col,
         selected_domains=selected_domains,
+        selected_domain_col=source_domain_col,
         taxonomy_name=taxonomy_name,
         selected_tax_vals=selected_tax_vals,
     )
@@ -748,30 +1212,30 @@ def _render_summary(data: dict[str, object]) -> None:
         file_name="ai_incident_analysis_report.pdf",
         mime="application/pdf",
     )
-    graph_options = [
-        "Incidents Over Time",
-        "Top Report Source Domains",
-        "Top Harm Domains",
-        "Report Count Distribution",
-        "Evidence Total Distribution",
-        "AI Harm Levels",
-    ]
-    selected_graph = st.selectbox("Choose a single graph to download", options=graph_options)
-    graph_bytes, graph_filename, graph_err = _build_single_graph_png(
-        graph_key=selected_graph,
+    graph_options = _available_graph_options(
         filtered_incidents=filtered_incidents,
         filtered_reports=filtered_reports,
         date_col=date_col,
     )
-    if graph_bytes is None:
-        st.info(graph_err)
+    if not graph_options:
+        st.info("No graph downloads are available for the current filtered dataset.")
     else:
-        st.download_button(
-            "Download Selected Graph (PNG)",
-            data=graph_bytes,
-            file_name=graph_filename,
-            mime="image/png",
+        selected_graph = st.selectbox("Choose a single graph to download", options=graph_options)
+        graph_bytes, graph_filename, graph_err = _build_single_graph_png(
+            graph_key=selected_graph,
+            filtered_incidents=filtered_incidents,
+            filtered_reports=filtered_reports,
+            date_col=date_col,
         )
+        if graph_bytes is None:
+            st.info(graph_err)
+        else:
+            st.download_button(
+                "Download Selected Graph (PNG)",
+                data=graph_bytes,
+                file_name=graph_filename,
+                mime="image/png",
+            )
 
     st.subheader("Preview")
     st.write("Incidents (first 10 rows)")
