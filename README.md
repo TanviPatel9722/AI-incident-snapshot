@@ -15,7 +15,7 @@ AI incident evidence is often fragmented across incident records, reports, and m
 - assess taxonomy coverage,
 - and support policy-relevant interpretation without overstating conclusions.
 
-## Current Snapshot Metrics (Local `data/`, computed on February 28, 2026)
+## Example Snapshot Metrics (Local `data/`, computed on February 28, 2026)
 - Incidents: `1,367`
 - Reports: `6,687`
 - MIT coverage: `90.86%` of incidents (`1,242 / 1,367`)
