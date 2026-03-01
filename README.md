@@ -106,6 +106,11 @@ Execution order:
 streamlit run src/dashboard.py
 ```
 
+Notebook vs Dashboard behavior:
+- Notebooks are a reproducible, step-by-step workflow over the local dataset in `data/` (or configured paths).
+- Dashboard is dynamic: each new uploaded/linked snapshot is loaded and analyzed live for that session.
+- Dashboard does not require notebooks to run first.
+
 Dashboard input modes:
 - Snapshot URL (`.tar.bz2`)
 - Uploaded snapshot archive (`.tar.bz2`)

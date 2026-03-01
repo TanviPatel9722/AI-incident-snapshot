@@ -157,6 +157,11 @@ Figures / CSV outputs / PDF export / Interpretation notes
   - Graph availability is dynamic and constrained to valid columns/tables.
   - Export support includes filtered CSV, PDF report, and single-graph PNG.
 
+### Notebook vs Dashboard Mode
+- **Notebook mode:** static, reproducible, step-by-step analysis over the dataset currently available in local paths (`data/` or configured paths).
+- **Dashboard mode:** dynamic, session-based analysis that reloads and recomputes results for each newly provided snapshot (URL, archive, or CSV bundle).
+- Both modes use the same core transformation logic, but dashboard execution does not depend on running notebooks first.
+
 ### Modular Components
 - `src/io.py`: extraction, CSV root detection, table loading.
 - `src/notebook_utils.py`: reusable notebook helpers.
