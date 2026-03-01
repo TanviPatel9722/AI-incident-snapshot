@@ -106,6 +106,9 @@ Execution order:
 streamlit run src/dashboard.py
 ```
 
+Live dashboard:
+- https://ai-incident-snapshot.streamlit.app/
+
 Notebook vs Dashboard behavior:
 - Notebooks are a reproducible, step-by-step workflow over the local dataset in `data/` (or configured paths).
 - Dashboard is dynamic: each new uploaded/linked snapshot is loaded and analyzed live for that session.
