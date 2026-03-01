@@ -12,8 +12,9 @@ This system standardizes the workflow end-to-end:
 2. Normalizes schema and `incident_id` variations.
 3. Builds incident-level enriched views across reports + taxonomy tables.
 4. Produces deterministic descriptive and trend analyses.
-5. Exports figures, CSV summaries, PDF reports, and filtered datasets.
-6. Includes explicit responsible-interpretation guardrails.
+   --The dashboard renders outputs derived from the same transformation layer used in the notebooks, ensuring consistency between interactive and reproducible          workflows.
+6. Exports figures, CSV summaries, PDF reports, and filtered datasets.
+7. Includes explicit responsible-interpretation guardrails.
 
 ## What Makes It Strong Technically
 - Shared utility layer (`src/notebook_utils.py`) for reusable loading/normalization/plotting.
@@ -58,6 +59,7 @@ These numbers are generated from code and update automatically for each snapshot
 
 ## Why This Is Hackathon-Ready
 - Practical, runnable, and reproducible.
+- Lowers the barrier for non-technical stakeholders via an interactive dashboard built on reproducible analytical foundations.
 - Strong technical hygiene (modular, defensive, deterministic).
 - Clear documentation for judges to rerun quickly.
 - Responsible interpretation integrated into the system itself, not added as an afterthought.
