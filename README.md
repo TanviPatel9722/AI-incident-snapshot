@@ -111,6 +111,33 @@ Dashboard input modes:
 - Uploaded snapshot archive (`.tar.bz2`)
 - Uploaded CSV bundle (`incidents.csv` + `reports.csv`; optional taxonomy and auxiliary tables)
 
+Default startup behavior:
+- The dashboard auto-loads bundled dataset files from `data/` if available.
+- You can disable this with environment variable `AUTOLOAD_DEFAULT_DATA=false`.
+- You can set a custom startup source with:
+  - `DEFAULT_DATA_DIR=/path/to/folder/with/csvs`
+  - or `DEFAULT_SNAPSHOT_URL=https://.../backup-YYYYMMDDHHMMSS.tar.bz2`
+
+## Always-On Deployment (No Routine Changes)
+This repo includes Docker and Render configuration for long-term hosting:
+- `Dockerfile`
+- `.streamlit/config.toml`
+- `render.yaml`
+
+One-time Render setup:
+1. Push this repository to GitHub.
+2. In Render, create a new Blueprint from this repo (it will read `render.yaml`).
+3. Use an always-on plan (for example `starter`) to avoid sleep.
+4. Deploy.
+
+After that, each push to `main` auto-deploys, and the app remains reachable at the same Render URL.
+
+Local Docker run:
+```bash
+docker build -t ai-incident-observatory .
+docker run --rm -p 8501:8501 ai-incident-observatory
+```
+
 ## Reproducibility and Reliability
 - Shared helpers (`src/notebook_utils.py`) enforce consistent loading, incident-id normalization, and plotting.
 - Optional tables are handled defensively; analysis degrades gracefully instead of crashing.

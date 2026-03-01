@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ai-incident-observatory
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: AUTOLOAD_DEFAULT_DATA
+        value: "true"

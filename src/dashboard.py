@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 import tempfile
 import urllib.parse
@@ -43,6 +44,9 @@ MAX_SMALL_MULTIPLES = 8
 MAX_STACKED_SERIES = 7
 MAX_DEVELOPER_ITEMS = 10
 RECENT_WINDOW_YEARS = 3
+AUTOLOAD_DEFAULT_DATA_ENV = "AUTOLOAD_DEFAULT_DATA"
+DEFAULT_DATA_DIR_ENV = "DEFAULT_DATA_DIR"
+DEFAULT_SNAPSHOT_URL_ENV = "DEFAULT_SNAPSHOT_URL"
 
 
 def _download_snapshot(url: str, target_dir: Path) -> Path:
@@ -140,6 +144,107 @@ def _build_processed_data(tables: dict[str, pd.DataFrame]) -> dict[str, object]:
         "aligned": aligned,
         "overview": overview,
     }
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@st.cache_data(show_spinner=False)
+def _load_processed_data_from_csv_root(csv_root_path: str) -> dict[str, object]:
+    tables = load_tables(Path(csv_root_path))
+    return _build_processed_data(tables)
+
+
+def _resolve_local_csv_root(data_dir: Path) -> Path | None:
+    data_dir = data_dir.expanduser().resolve()
+    if (data_dir / "incidents.csv").exists() and (data_dir / "reports.csv").exists():
+        return data_dir
+    try:
+        csv_root = find_csv_root(data_dir)
+    except FileNotFoundError:
+        return None
+    if (csv_root / "incidents.csv").exists() and (csv_root / "reports.csv").exists():
+        return csv_root
+    return None
+
+
+def _local_data_candidates(configured_data_dir: str | None = None) -> list[Path]:
+    candidates: list[Path] = []
+    if configured_data_dir and configured_data_dir.strip():
+        candidates.append(Path(configured_data_dir.strip()))
+    repo_data_dir = Path(__file__).resolve().parents[1] / "data"
+    cwd_data_dir = Path.cwd() / "data"
+    for candidate in [repo_data_dir, cwd_data_dir]:
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _autodetect_local_data(configured_data_dir: str | None = None) -> tuple[dict[str, object], Path]:
+    checked: list[str] = []
+    for data_dir in _local_data_candidates(configured_data_dir):
+        if not data_dir.exists():
+            checked.append(f"{data_dir} (not found)")
+            continue
+        csv_root = _resolve_local_csv_root(data_dir)
+        if csv_root is None:
+            checked.append(f"{data_dir} (missing incidents.csv/reports.csv)")
+            continue
+        return _load_processed_data_from_csv_root(str(csv_root)), csv_root
+    details = "; ".join(checked) if checked else "none"
+    raise FileNotFoundError(f"No default dataset found. Checked: {details}")
+
+
+def _load_data_from_snapshot_url(snapshot_url: str) -> dict[str, object]:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        snapshot_path = _download_snapshot(snapshot_url.strip(), tmp_dir)
+        extracted = extract_snapshot(snapshot_path, tmp_dir)
+        csv_root = find_csv_root(extracted)
+        tables = load_tables(csv_root)
+        return _build_processed_data(tables)
+
+
+def _load_data_from_uploaded_snapshot(uploaded_snapshot) -> dict[str, object]:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        snapshot_path = _save_uploaded_file(
+            uploaded_snapshot, tmp_dir / uploaded_snapshot.name
+        )
+        extracted = extract_snapshot(snapshot_path, tmp_dir)
+        csv_root = find_csv_root(extracted)
+        tables = load_tables(csv_root)
+        return _build_processed_data(tables)
+
+
+def _maybe_autoload_default_data() -> None:
+    if st.session_state.get("loaded_data") is not None:
+        return
+    if st.session_state.get("autoload_attempted"):
+        return
+
+    st.session_state["autoload_attempted"] = True
+    st.session_state["autoload_error"] = ""
+
+    if not _env_flag(AUTOLOAD_DEFAULT_DATA_ENV, default=True):
+        return
+
+    default_snapshot_url = os.getenv(DEFAULT_SNAPSHOT_URL_ENV, "").strip()
+    default_data_dir = os.getenv(DEFAULT_DATA_DIR_ENV, "").strip()
+    try:
+        if default_snapshot_url:
+            st.session_state["loaded_data"] = _load_data_from_snapshot_url(default_snapshot_url)
+            st.session_state["loaded_source"] = f"Default snapshot URL: {default_snapshot_url}"
+            return
+        loaded_data, csv_root = _autodetect_local_data(default_data_dir or None)
+        st.session_state["loaded_data"] = loaded_data
+        st.session_state["loaded_source"] = f"Bundled local data: {csv_root}"
+    except Exception as exc:
+        st.session_state["autoload_error"] = str(exc)
 
 
 def _best_date_column(df: pd.DataFrame) -> str | None:
@@ -1254,6 +1359,28 @@ def main() -> None:
     st.title("AI Incident Observatory Dashboard")
     st.caption("Load a snapshot URL or your own dataset to explore incidents and reports.")
 
+    if "loaded_data" not in st.session_state:
+        st.session_state["loaded_data"] = None
+    if "loaded_source" not in st.session_state:
+        st.session_state["loaded_source"] = ""
+    if "autoload_attempted" not in st.session_state:
+        st.session_state["autoload_attempted"] = False
+    if "autoload_error" not in st.session_state:
+        st.session_state["autoload_error"] = ""
+
+    if st.session_state["loaded_data"] is None and not st.session_state["autoload_attempted"]:
+        with st.spinner("Loading default dataset..."):
+            _maybe_autoload_default_data()
+    else:
+        _maybe_autoload_default_data()
+
+    if st.session_state["autoload_error"] and st.session_state["loaded_data"] is None:
+        st.info(
+            "Default data autoload was unavailable. "
+            "Load data manually below, or set environment variable "
+            f"`{DEFAULT_DATA_DIR_ENV}` or `{DEFAULT_SNAPSHOT_URL_ENV}`."
+        )
+
     source_mode = st.radio(
         "Choose data source",
         [
@@ -1262,11 +1389,6 @@ def main() -> None:
             "Upload custom CSV dataset",
         ],
     )
-
-    if "loaded_data" not in st.session_state:
-        st.session_state["loaded_data"] = None
-    if "loaded_source" not in st.session_state:
-        st.session_state["loaded_source"] = ""
 
     if source_mode == "Snapshot URL":
         with st.form("snapshot_url_form"):
@@ -1281,14 +1403,10 @@ def main() -> None:
             else:
                 try:
                     with st.spinner("Downloading and processing snapshot..."):
-                        with tempfile.TemporaryDirectory() as tmp:
-                            tmp_dir = Path(tmp)
-                            snapshot_path = _download_snapshot(snapshot_url.strip(), tmp_dir)
-                            extracted = extract_snapshot(snapshot_path, tmp_dir)
-                            csv_root = find_csv_root(extracted)
-                            tables = load_tables(csv_root)
-                            st.session_state["loaded_data"] = _build_processed_data(tables)
-                            st.session_state["loaded_source"] = f"Snapshot URL: {snapshot_url.strip()}"
+                        st.session_state["loaded_data"] = _load_data_from_snapshot_url(
+                            snapshot_url.strip()
+                        )
+                        st.session_state["loaded_source"] = f"Snapshot URL: {snapshot_url.strip()}"
                 except Exception as exc:
                     st.error(f"Failed to load snapshot URL: {exc}")
 
@@ -1302,16 +1420,12 @@ def main() -> None:
             else:
                 try:
                     with st.spinner("Processing uploaded snapshot..."):
-                        with tempfile.TemporaryDirectory() as tmp:
-                            tmp_dir = Path(tmp)
-                            snapshot_path = _save_uploaded_file(
-                                uploaded_snapshot, tmp_dir / uploaded_snapshot.name
-                            )
-                            extracted = extract_snapshot(snapshot_path, tmp_dir)
-                            csv_root = find_csv_root(extracted)
-                            tables = load_tables(csv_root)
-                            st.session_state["loaded_data"] = _build_processed_data(tables)
-                            st.session_state["loaded_source"] = f"Uploaded archive: {uploaded_snapshot.name}"
+                        st.session_state["loaded_data"] = _load_data_from_uploaded_snapshot(
+                            uploaded_snapshot
+                        )
+                        st.session_state["loaded_source"] = (
+                            f"Uploaded archive: {uploaded_snapshot.name}"
+                        )
                 except Exception as exc:
                     st.error(f"Failed to process uploaded snapshot: {exc}")
 
